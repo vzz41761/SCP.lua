@@ -1,6 +1,6 @@
 -- cobble hills loader (SCP:RP)
--- ⚠️ Troque o "vzz41761" pelo seu usuário do GitHub se for diferente ⚠️
-local baseUrl = "https://raw.githubusercontent.com/vzz41761/scp/main/"
+-- ⚠️ Se o seu usuário do GitHub NÃO for "vzz41761", troque abaixo! ⚠️
+local baseUrl = "https://raw.githubusercontent.com/vzz41761/SCP.lua/main/"
 
 if getgenv().Cobble_Unload then 
     pcall(getgenv().Cobble_Unload) 
