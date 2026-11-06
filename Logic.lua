@@ -1,4 +1,4 @@
--- cobble hills (SCP:RP Hub)
+-- cobble hills logic (SCP:RP)
 pcall(function() if setthreadidentity then setthreadidentity(8) end end)
 if getgenv().Cobble_Unload then pcall(getgenv().Cobble_Unload) end
 
@@ -13,11 +13,15 @@ local Camera = Workspace.CurrentCamera
 if not Drawing then warn("[cobble] Sem Drawing API"); return end
 
 -- CONFIG
+local defaults = {
+    Aimbot = { Enabled=false, Key=Enum.UserInputType.MouseButton2, FOV=120, Smooth=0.35, ShowFOV=true, TeamCheck=true, Part="Head", WallCheck=true },
+    ESP = { Enabled=true, Players=true, Items=true, MaxDist=1000 },
+    Move = { Speed=false, SpeedVal=30, Jump=false, JumpVal=50, Noclip=false, Fly=false },
+    Visuals = { Fullbright=false, NoFog=false }
+}
 local Config = getgenv().CobbleConfig or {}
-Config.Aimbot = Config.Aimbot or { Enabled=false, Key=Enum.UserInputType.MouseButton2, FOV=120, Smooth=0.35, ShowFOV=true, TeamCheck=true, Part="Head", WallCheck=true }
-Config.ESP = Config.ESP or { Enabled=true, Players=true, Items=true, MaxDist=1000 }
-Config.Move = Config.Move or { Speed=false, SpeedVal=30, Jump=false, JumpVal=50, Noclip=false, Fly=false }
-Config.Visuals = Config.Visuals or { Fullbright=false, NoFog=false }
+local function merge(dst, src) for k,v in pairs(src) do if type(v) == "table" and type(dst[k]) == "table" then merge(dst[k], v) elseif dst[k] == nil then dst[k] = v end end end
+for s,tbl in pairs(defaults) do Config[s] = Config[s] or {}; merge(Config[s], tbl) end
 getgenv().CobbleConfig = Config
 
 local connections = {}
@@ -40,7 +44,7 @@ task.spawn(function()
             end
         end
         CachedPlayers = temp
-        task.wait(0.5)
+        task.wait(0.3)
     end
 end)
 
@@ -57,12 +61,8 @@ task.spawn(function()
     end
 end)
 
--- AIMBOT
+-- AIMBOT VISUAL E WALL CHECK
 local aimHeld, aimTarget = false, nil
-local function isAimInput(input)
-    local b = Config.Aimbot.Key
-    return b.EnumType == Enum.KeyCode and input.KeyCode == b or input.UserInputType == b
-end
 
 local function isVisible(targetChar)
     if not Config.Aimbot.WallCheck then return true end
@@ -100,6 +100,11 @@ local function pickTarget()
     return best
 end
 
+local function isAimInput(input)
+    local b = Config.Aimbot.Key
+    return b.EnumType == Enum.KeyCode and input.KeyCode == b or input.UserInputType == b
+end
+
 track(UserInputService.InputBegan:Connect(function(i, gpe) if not gpe and isAimInput(i) then aimHeld = true; aimTarget = nil end end))
 track(UserInputService.InputEnded:Connect(function(i) if isAimInput(i) then aimHeld = false; aimTarget = nil end end))
 
@@ -112,7 +117,7 @@ RunService:BindToRenderStep("cobble_aim", Enum.RenderPriority.Camera.Value + 1, 
     Camera.CFrame = Camera.CFrame:Lerp(want, 1 - (1 - Config.Aimbot.Smooth) ^ (dt * 60))
 end)
 
--- MOVIMENTO E LUZ
+-- MOVIMENTO E VISUAIS
 local flyBV, flyConn = nil, nil
 local FB_Defaults = { Ambient=Lighting.Ambient, OutdoorAmbient=Lighting.OutdoorAmbient, Brightness=Lighting.Brightness, ClockTime=Lighting.ClockTime, FogEnd=Lighting.FogEnd }
 local fbCC = nil
@@ -167,7 +172,7 @@ track(RunService.Heartbeat:Connect(function()
     Lighting.FogEnd = Config.Visuals.NoFog and 1e5 or FB_Defaults.FogEnd
 end))
 
--- ESP E DRAWINGS
+-- ESP DRAWINGS
 local pDraw, tDraw = {}, {}
 local fovCircle = Drawing.new("Circle")
 fovCircle.Thickness = 1; fovCircle.Filled = false; fovCircle.NumSides = 60
@@ -177,7 +182,6 @@ track(RunService.RenderStepped:Connect(function()
     local camPos = Camera.CFrame.Position
     local activeP, activeT = {}, {}
 
-    -- Players ESP
     if Config.ESP.Enabled and Config.ESP.Players then
         for plr, data in pairs(CachedPlayers) do
             if data.Hum.Health > 0 then
@@ -206,7 +210,6 @@ track(RunService.RenderStepped:Connect(function()
     end
     for p, o in pairs(pDraw) do if not activeP[p] then o.box:Remove(); o.name:Remove(); o.dist:Remove(); pDraw[p] = nil end end
 
-    -- Tools ESP
     if Config.ESP.Enabled and Config.ESP.Items then
         for tool, info in pairs(CachedTools) do
             local dist = (camPos - info.Pos).Magnitude
@@ -221,69 +224,10 @@ track(RunService.RenderStepped:Connect(function()
     end
     for t, d in pairs(tDraw) do if not activeT[t] then d:Remove(); tDraw[t] = nil end end
 
-    -- FOV
     if Config.Aimbot.Enabled and Config.Aimbot.ShowFOV and aimHeld then
         fovCircle.Position = Camera.ViewportSize * 0.5; fovCircle.Radius = Config.Aimbot.FOV; fovCircle.Visible = true
     else fovCircle.Visible = false end
 end))
-
--- UI (SLATE)
-local SU = "https://raw.githubusercontent.com/PulseZax/Slate/refs/heads/main/.lua"
-local ok, S = pcall(function() return loadstring(game:HttpGet(SU), "@Slate")() end)
-if not ok or not S then warn("Falha ao carregar a UI do Slate."); return end
-
-S.Theme.Preset("Violet")
-S.Theme.Set({ Background = Color3.fromRGB(12, 11, 20), Surface = Color3.fromRGB(22, 19, 34), SurfaceAlt = Color3.fromRGB(31, 26, 46), Elevated = Color3.fromRGB(39, 31, 57), Accent = Color3.fromRGB(0, 255, 150), ToggleOn = Color3.fromRGB(0, 255, 150), Text = Color3.fromRGB(245, 242, 255), Muted = Color3.fromRGB(163, 154, 185), Radius = 12, RowHeight = 42, HeaderHeight = 56 })
-pcall(function() S:SetFontFamily("Montserrat") end)
-
-local Window = S:CreateWindow({ Name = "COBBLE <font color='#00FF96'>SCP</font>", Subtitle = "SCP:RP HUB", Icon = "shield", Logo = true, Size = UDim2.fromOffset(480, 400), ToggleKey = Enum.KeyCode.Insert, Backdrop = "aurora" })
-
--- ABA 1: AIMBOT
-local tabAim = Window:CreateTab({ Name = "AIMBOT", Icon = "crosshair" })
-tabAim:SetColumns(2)
-local secAim = tabAim:CreateSection({ Name = "Aimbot Settings" })
-secAim:Toggle({ Name = "Ativar Aimbot", Default = false, Callback = function(v) Config.Aimbot.Enabled = v end })
-secAim:Toggle({ Name = "Wall Check (Só Visível)", Default = true, Callback = function(v) Config.Aimbot.WallCheck = v end })
-secAim:Toggle({ Name = "Team Check", Default = true, Callback = function(v) Config.Aimbot.TeamCheck = v end })
-secAim:Dropdown({ Name = "Parte do Corpo", Options = {"Head", "Torso"}, Default = "Head", Callback = function(v) Config.Aimbot.Part = v end })
-secAim:Slider({ Name = "FOV", Min = 20, Max = 400, Default = 120, Callback = function(v) Config.Aimbot.FOV = v end })
-secAim:Slider({ Name = "Suavidade", Min = 0.15, Max = 1.0, Default = 0.35, Callback = function(v) Config.Aimbot.Smooth = v end })
-
--- ABA 2: VISUAIS
-local tabVis = Window:CreateTab({ Name = "ESP & VISUAL", Icon = "eye" })
-tabVis:SetColumns(2)
-local secEsp = tabVis:CreateSection({ Name = "ESP" })
-secEsp:Toggle({ Name = "Ativar ESP", Default = true, Callback = function(v) Config.ESP.Enabled = v end })
-secEsp:Toggle({ Name = "Jogadores", Default = true, Callback = function(v) Config.ESP.Players = v end })
-secEsp:Toggle({ Name = "Itens (Armas/Cartões)", Default = true, Callback = function(v) Config.ESP.Items = v end })
-secEsp:Slider({ Name = "Distância Max", Min = 100, Max = 3000, Default = 1000, Callback = function(v) Config.ESP.MaxDist = v end })
-
-local secLuz = tabVis:CreateSection({ Name = "Luz e Câmera" })
-secLuz:Toggle({ Name = "Fullbright", Default = false, Callback = function(v) Config.Visuals.Fullbright = v end })
-secLuz:Toggle({ Name = "Remover Neblina", Default = false, Callback = function(v) Config.Visuals.NoFog = v end })
-
--- ABA 3: MOVIMENTO
-local tabMove = Window:CreateTab({ Name = "MOVIMENTO", Icon = "activity" })
-tabMove:SetColumns(2)
-local secMove = tabMove:CreateSection({ Name = "Física" })
-secMove:Toggle({ Name = "Speed Hack", Default = false, Callback = function(v) Config.Move.Speed = v end })
-secMove:Slider({ Name = "Velocidade", Min = 16, Max = 100, Default = 30, Callback = function(v) Config.Move.SpeedVal = v end })
-secMove:Toggle({ Name = "Força do Pulo", Default = false, Callback = function(v) Config.Move.Jump = v end })
-secMove:Slider({ Name = "Pulo", Min = 50, Max = 200, Default = 50, Callback = function(v) Config.Move.JumpVal = v end })
-secMove:Toggle({ Name = "Noclip", Default = false, Callback = function(v) Config.Move.Noclip = v end })
-
-local secFly = tabMove:CreateSection({ Name = "Voo" })
-secFly:Toggle({ Name = "Fly", Default = false, Callback = function(v) Config.Move.Fly = v end })
-
--- ABA 4: CONFIG
-local tabConfig = Window:CreateTab({ Name = "CONFIG", Icon = "settings" })
-tabConfig:SetColumns(1)
-tabConfig:CreateSection({ Name = "Sessão" }):Button({ Name = "UNLOAD SCRIPT", Icon = "trash-2", Callback = function()
-    if getgenv().Cobble_Unload then getgenv().Cobble_Unload() end
-    Window:Destroy(); S:Destroy(); S.Cleanup()
-end })
-
-getgenv().Cobble_UI_Loaded = Window
 
 getgenv().Cobble_Unload = function()
     alive = false
@@ -295,5 +239,4 @@ getgenv().Cobble_Unload = function()
     if flyConn then flyConn:Disconnect() end
     if fbCC then fbCC:Destroy() end
     if getgenv().Cobble_UI_Loaded then getgenv().Cobble_UI_Loaded:Destroy() end
-    print("[cobble] SCP Script Unloaded.")
 end
