@@ -1,4 +1,4 @@
--- cobble hills logic (SCP:RP)
+-- cobble hills logic (SCP:RP - V2)
 pcall(function() if setthreadidentity then setthreadidentity(8) end end)
 if getgenv().Cobble_Unload then pcall(getgenv().Cobble_Unload) end
 
@@ -14,8 +14,14 @@ if not Drawing then warn("[cobble] Sem Drawing API"); return end
 
 -- CONFIG
 local defaults = {
-    Aimbot = { Enabled=false, Key=Enum.UserInputType.MouseButton2, FOV=120, Smooth=0.35, ShowFOV=true, TeamCheck=true, Part="Head", WallCheck=true },
-    ESP = { Enabled=true, Players=true, Items=true, MaxDist=1000 },
+    Aimbot = { 
+        Enabled=false, Mode="Camera", Key=Enum.UserInputType.MouseButton2, 
+        FOV=120, Smooth=0.35, ShowFOV=true, TeamCheck=true, 
+        Part="Head", WallCheck=true, StickyTime=1.5, AssistStrength=0.4 
+    },
+    ESP = { 
+        Enabled=true, Players=true, Items=true, TeamColors=true, MaxDist=1000 
+    },
     Move = { Speed=false, SpeedVal=30, Jump=false, JumpVal=50, Noclip=false, Fly=false },
     Visuals = { Fullbright=false, NoFog=false }
 }
@@ -28,6 +34,20 @@ local connections = {}
 local alive = true
 local function track(c) connections[#connections+1] = c; return c end
 
+-- FUNÇÕES DE TIME E CORES
+local function getTeamColor(plr)
+    if plr.TeamColor then return plr.TeamColor.Color end
+    if plr.Team then return plr.Team.TeamColor.Color end
+    return Color3.fromRGB(255, 255, 255) -- Branco se não tiver time
+end
+
+local function isTeammate(plr)
+    if not LP.Team then return false end -- Se você não tem time, todos são inimigos
+    if plr.Team == LP.Team then return true end
+    if LP.TeamColor and plr.TeamColor == LP.TeamColor then return true end
+    return false
+end
+
 -- CACHES
 local CachedPlayers, CachedTools = {}, {}
 task.spawn(function()
@@ -39,7 +59,7 @@ task.spawn(function()
                 local root = plr.Character:FindFirstChild("HumanoidRootPart")
                 local head = plr.Character:FindFirstChild("Head")
                 if hum and root and hum.Health > 0 then
-                    temp[plr] = { Char=plr.Character, Hum=hum, Root=root, Head=head, Team=plr.Team }
+                    temp[plr] = { Char=plr.Character, Hum=hum, Root=root, Head=head, Player=plr }
                 end
             end
         end
@@ -61,8 +81,10 @@ task.spawn(function()
     end
 end)
 
--- AIMBOT VISUAL E WALL CHECK
+-- AIMBOT (Sticky Target + Modos)
 local aimHeld, aimTarget = false, nil
+local lastTarget = nil
+local lastTargetTime = 0
 
 local function isVisible(targetChar)
     if not Config.Aimbot.WallCheck then return true end
@@ -74,29 +96,42 @@ local function isVisible(targetChar)
 end
 
 local function pickTarget()
-    if aimTarget and aimTarget.Char.Parent and aimTarget.Hum.Health > 0 then
-        if Config.Aimbot.TeamCheck and aimTarget.Team == LP.Team then aimTarget = nil; return nil end
-        if not isVisible(aimTarget.Char) then aimTarget = nil; return nil end
-        return aimTarget
+    -- Sticky Target: Se ele já travou em alguém, fica nele por X segundos
+    if lastTarget and lastTarget.Char.Parent and lastTarget.Hum.Health > 0 then
+        if (tick() - lastTargetTime) < Config.Aimbot.StickyTime then
+            if Config.Aimbot.TeamCheck and isTeammate(lastTarget.Player) then
+                lastTarget = nil
+            elseif not isVisible(lastTarget.Char) then
+                lastTarget = nil
+            else
+                return lastTarget
+            end
+        end
     end
-    aimTarget = nil
+
     local center = Camera.ViewportSize * 0.5
     local best, bestD = nil, Config.Aimbot.FOV
+    
     for _, d in pairs(CachedPlayers) do
-        if d.Hum.Health > 0 and not (Config.Aimbot.TeamCheck and d.Team == LP.Team) then
+        if d.Hum.Health > 0 and not (Config.Aimbot.TeamCheck and isTeammate(d.Player)) then
             local part = Config.Aimbot.Part == "Head" and d.Head or d.Root
             if part then
                 local sp, on = Camera:WorldToViewportPoint(part.Position)
                 if sp.Z > 0 and on then
                     local dist = (Vector2.new(sp.X, sp.Y) - center).Magnitude
                     if dist < bestD and isVisible(d.Char) then
-                        bestD = dist; best = d
+                        bestD = dist
+                        best = d
                     end
                 end
             end
         end
     end
-    aimTarget = best
+    
+    if best then
+        lastTarget = best
+        lastTargetTime = tick()
+    end
     return best
 end
 
@@ -105,19 +140,36 @@ local function isAimInput(input)
     return b.EnumType == Enum.KeyCode and input.KeyCode == b or input.UserInputType == b
 end
 
-track(UserInputService.InputBegan:Connect(function(i, gpe) if not gpe and isAimInput(i) then aimHeld = true; aimTarget = nil end end))
-track(UserInputService.InputEnded:Connect(function(i) if isAimInput(i) then aimHeld = false; aimTarget = nil end end))
+track(UserInputService.InputBegan:Connect(function(i, gpe) if not gpe and isAimInput(i) then aimHeld = true; lastTarget = nil end end))
+track(UserInputService.InputEnded:Connect(function(i) if isAimInput(i) then aimHeld = false; lastTarget = nil end end))
 
+-- Loop de Aimbot e Aim Assist
 RunService:BindToRenderStep("cobble_aim", Enum.RenderPriority.Camera.Value + 1, function(dt)
     if not Config.Aimbot.Enabled or not aimHeld then return end
     local t = pickTarget()
     if not t then return end
+    
     local part = Config.Aimbot.Part == "Head" and t.Head or t.Root
-    local want = CFrame.lookAt(Camera.CFrame.Position, part.Position)
-    Camera.CFrame = Camera.CFrame:Lerp(want, 1 - (1 - Config.Aimbot.Smooth) ^ (dt * 60))
+    local targetPos = part.Position
+    
+    if Config.Aimbot.Mode == "Aim Assist" then
+        -- Move o mouse físico levemente (Legit)
+        local sp, on = Camera:WorldToViewportPoint(targetPos)
+        if on then
+            local center = Camera.ViewportSize * 0.5
+            local dx = (sp.X - center.X) * Config.Aimbot.AssistStrength
+            local dy = (sp.Y - center.Y) * Config.Aimbot.AssistStrength
+            if mousemoverel then mousemoverel(dx, dy) end
+        end
+    else
+        -- Move a câmera (Camera)
+        local want = CFrame.lookAt(Camera.CFrame.Position, targetPos)
+        local s = math.clamp(Config.Aimbot.Smooth, 0.01, 1)
+        Camera.CFrame = Camera.CFrame:Lerp(want, 1 - (1 - s) ^ (dt * 60))
+    end
 end)
 
--- MOVIMENTO E VISUAIS
+-- MOVIMENTO E LUZ
 local flyBV, flyConn = nil, nil
 local FB_Defaults = { Ambient=Lighting.Ambient, OutdoorAmbient=Lighting.OutdoorAmbient, Brightness=Lighting.Brightness, ClockTime=Lighting.ClockTime, FogEnd=Lighting.FogEnd }
 local fbCC = nil
@@ -192,7 +244,17 @@ track(RunService.RenderStepped:Connect(function()
                     o.box.Thickness = 1; o.name.Outline = true; o.name.Center = true; o.dist.Center = true; o.dist.Outline = true
                     pDraw[plr] = o
                 end
-                local color = (Config.Aimbot.TeamCheck and data.Team == LP.Team) and Color3.fromRGB(0,255,150) or Color3.fromRGB(255,0,0)
+                
+                -- Cor do ESP baseada no time
+                local color = Color3.fromRGB(255, 0, 0) -- Vermelho padrão
+                if Config.ESP.TeamColors then
+                    color = getTeamColor(plr)
+                    -- Se for o seu time, deixa verde/azul brilhante pra destacar
+                    if isTeammate(plr) then color = color:Lerp(Color3.fromRGB(0, 255, 0), 0.5) end
+                else
+                    if isTeammate(plr) then color = Color3.fromRGB(0, 255, 150) end
+                end
+
                 o.box.Color = color; o.name.Color = color; o.dist.Color = color
 
                 local sp, on = Camera:WorldToViewportPoint(data.Root.Position + Vector3.new(0,2.5,0))
