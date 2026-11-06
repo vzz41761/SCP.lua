@@ -1,4 +1,4 @@
--- cobble hills logic (SCP:RP - V2)
+-- cobble hills logic (SCP:RP - V3 Safe)
 pcall(function() if setthreadidentity then setthreadidentity(8) end end)
 if getgenv().Cobble_Unload then pcall(getgenv().Cobble_Unload) end
 
@@ -22,7 +22,7 @@ local defaults = {
     ESP = { 
         Enabled=true, Players=true, Items=true, TeamColors=true, MaxDist=1000 
     },
-    Move = { Speed=false, SpeedVal=30, Jump=false, JumpVal=50, Noclip=false, Fly=false },
+    Move = { Speed=false, SpeedVal=30, Jump=false, JumpVal=150, Noclip=false }, -- JumpPower alto, sem Fly
     Visuals = { Fullbright=false, NoFog=false }
 }
 local Config = getgenv().CobbleConfig or {}
@@ -38,11 +38,11 @@ local function track(c) connections[#connections+1] = c; return c end
 local function getTeamColor(plr)
     if plr.TeamColor then return plr.TeamColor.Color end
     if plr.Team then return plr.Team.TeamColor.Color end
-    return Color3.fromRGB(255, 255, 255) -- Branco se não tiver time
+    return Color3.fromRGB(255, 255, 255)
 end
 
 local function isTeammate(plr)
-    if not LP.Team then return false end -- Se você não tem time, todos são inimigos
+    if not LP.Team then return false end
     if plr.Team == LP.Team then return true end
     if LP.TeamColor and plr.TeamColor == LP.TeamColor then return true end
     return false
@@ -96,7 +96,6 @@ local function isVisible(targetChar)
 end
 
 local function pickTarget()
-    -- Sticky Target: Se ele já travou em alguém, fica nele por X segundos
     if lastTarget and lastTarget.Char.Parent and lastTarget.Hum.Health > 0 then
         if (tick() - lastTargetTime) < Config.Aimbot.StickyTime then
             if Config.Aimbot.TeamCheck and isTeammate(lastTarget.Player) then
@@ -111,7 +110,6 @@ local function pickTarget()
 
     local center = Camera.ViewportSize * 0.5
     local best, bestD = nil, Config.Aimbot.FOV
-    
     for _, d in pairs(CachedPlayers) do
         if d.Hum.Health > 0 and not (Config.Aimbot.TeamCheck and isTeammate(d.Player)) then
             local part = Config.Aimbot.Part == "Head" and d.Head or d.Root
@@ -120,18 +118,13 @@ local function pickTarget()
                 if sp.Z > 0 and on then
                     local dist = (Vector2.new(sp.X, sp.Y) - center).Magnitude
                     if dist < bestD and isVisible(d.Char) then
-                        bestD = dist
-                        best = d
+                        bestD = dist; best = d
                     end
                 end
             end
         end
     end
-    
-    if best then
-        lastTarget = best
-        lastTargetTime = tick()
-    end
+    if best then lastTarget = best; lastTargetTime = tick() end
     return best
 end
 
@@ -143,18 +136,14 @@ end
 track(UserInputService.InputBegan:Connect(function(i, gpe) if not gpe and isAimInput(i) then aimHeld = true; lastTarget = nil end end))
 track(UserInputService.InputEnded:Connect(function(i) if isAimInput(i) then aimHeld = false; lastTarget = nil end end))
 
--- Loop de Aimbot e Aim Assist
 RunService:BindToRenderStep("cobble_aim", Enum.RenderPriority.Camera.Value + 1, function(dt)
     if not Config.Aimbot.Enabled or not aimHeld then return end
     local t = pickTarget()
     if not t then return end
-    
     local part = Config.Aimbot.Part == "Head" and t.Head or t.Root
-    local targetPos = part.Position
     
     if Config.Aimbot.Mode == "Aim Assist" then
-        -- Move o mouse físico levemente (Legit)
-        local sp, on = Camera:WorldToViewportPoint(targetPos)
+        local sp, on = Camera:WorldToViewportPoint(part.Position)
         if on then
             local center = Camera.ViewportSize * 0.5
             local dx = (sp.X - center.X) * Config.Aimbot.AssistStrength
@@ -162,15 +151,13 @@ RunService:BindToRenderStep("cobble_aim", Enum.RenderPriority.Camera.Value + 1, 
             if mousemoverel then mousemoverel(dx, dy) end
         end
     else
-        -- Move a câmera (Camera)
-        local want = CFrame.lookAt(Camera.CFrame.Position, targetPos)
+        local want = CFrame.lookAt(Camera.CFrame.Position, part.Position)
         local s = math.clamp(Config.Aimbot.Smooth, 0.01, 1)
         Camera.CFrame = Camera.CFrame:Lerp(want, 1 - (1 - s) ^ (dt * 60))
     end
 end)
 
 -- MOVIMENTO E LUZ
-local flyBV, flyConn = nil, nil
 local FB_Defaults = { Ambient=Lighting.Ambient, OutdoorAmbient=Lighting.OutdoorAmbient, Brightness=Lighting.Brightness, ClockTime=Lighting.ClockTime, FogEnd=Lighting.FogEnd }
 local fbCC = nil
 
@@ -185,33 +172,17 @@ track(RunService.Heartbeat:Connect(function()
     local char = LP.Character
     if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
-    local root = char:FindFirstChild("HumanoidRootPart")
 
     if hum then
         hum.WalkSpeed = Config.Move.Speed and Config.Move.SpeedVal or 16
-        if Config.Move.Jump then hum.UseJumpPower = true; hum.JumpPower = Config.Move.JumpVal end
+        if Config.Move.Jump then 
+            hum.UseJumpPower = true
+            hum.JumpPower = Config.Move.JumpVal 
+        end
     end
 
     if Config.Move.Noclip then
         for _, p in ipairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end
-    end
-
-    if Config.Move.Fly and not flyBV and root then
-        hum.PlatformStand = true
-        flyBV = Instance.new("BodyVelocity"); flyBV.MaxForce = Vector3.new(1e5,1e5,1e5); flyBV.Parent = root
-        flyConn = RunService.RenderStepped:Connect(function()
-            local dir = Vector3.zero
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + Camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - Camera.CFrame.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - Camera.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + Camera.CFrame.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0,1,0) end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0,1,0) end
-            flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * 50 or Vector3.zero
-        end)
-    elseif not Config.Move.Fly and flyBV then
-        hum.PlatformStand = false; flyBV:Destroy(); flyBV = nil
-        if flyConn then flyConn:Disconnect(); flyConn = nil end
     end
 
     if Config.Visuals.Fullbright then
@@ -245,11 +216,9 @@ track(RunService.RenderStepped:Connect(function()
                     pDraw[plr] = o
                 end
                 
-                -- Cor do ESP baseada no time
-                local color = Color3.fromRGB(255, 0, 0) -- Vermelho padrão
+                local color = Color3.fromRGB(255, 0, 0)
                 if Config.ESP.TeamColors then
                     color = getTeamColor(plr)
-                    -- Se for o seu time, deixa verde/azul brilhante pra destacar
                     if isTeammate(plr) then color = color:Lerp(Color3.fromRGB(0, 255, 0), 0.5) end
                 else
                     if isTeammate(plr) then color = Color3.fromRGB(0, 255, 150) end
@@ -297,8 +266,6 @@ getgenv().Cobble_Unload = function()
     for _, o in pairs(pDraw) do o.box:Remove(); o.name:Remove(); o.dist:Remove() end
     for _, d in pairs(tDraw) do d:Remove() end
     pcall(function() fovCircle:Remove() end)
-    if flyBV then flyBV:Destroy() end
-    if flyConn then flyConn:Disconnect() end
     if fbCC then fbCC:Destroy() end
     if getgenv().Cobble_UI_Loaded then getgenv().Cobble_UI_Loaded:Destroy() end
 end
